@@ -1,0 +1,194 @@
+ Boostly — boost morale, one kudos at a time
+Build a working application that enables college students to recognize their peers, allocate monthly credits, and redeem earned rewards. The platform should encourage appreciation and engagement across student communities — a simple, transparent system for celebrating contributions and converting recognition into tangible value.
+
+Use Python or Java as your programming language. You can choose any framework (e.g., Flask, FastAPI, Django for Python; Spring Boot for Java) and any database of your choice.
+
+Core Functionality
+1. Recognition
+Allows one student to recognize another and transfer a certain number of credits.
+
+Business Rules:
+Each student receives 100 credits every month (reset at the start of each calendar month)
+Students cannot send credits to themselves (self-recognition is not allowed)
+Each student has a monthly sending limit of 100 credits (per calendar month)
+A student cannot send more credits than they currently have in their balance
+A student cannot exceed their monthly sending limit
+2. Endorsements
+Enables students to endorse an existing recognition entry (like/cheer).
+
+Business Rules:
+
+Each endorser can endorse a recognition entry only once
+Endorsements are just a count — they don't affect credit balances or any other functionality
+3. Redemption
+Lets students redeem the credits they've received.
+
+Business Rules:
+
+Credits are converted into a fixed-value voucher at ₹5 per credit
+When credits are redeemed, they are permanently deducted from the student's balance
+A student can only redeem credits they have received
+Step-Up Challenges
+1. Credit Reset
+Add a mechanism to automatically reset each student's monthly credit balance to 100 at the start of a new month, with an optional carry-forward of up to 50 unused credits.
+
+Business Rules:
+
+Each student's available credits reset to 100 at the start of each calendar month
+Up to 50 unused credits from the previous month can be carried forward
+If a student has more than 50 unused credits, only 50 can be carried forward
+The monthly sending limit also resets to 100 credits
+2. Leaderboard
+Build a feature to list top recipients ranked by total credits received. Include both recognition counts and endorsement totals.
+
+Business Rules:
+
+Rank students by total credits received (descending order)
+If two students have the same total credits, rank by student ID (ascending order)
+Include the total number of recognitions received by each student
+Include the total number of endorsements received across all recognitions
+Support a limit parameter to control how many top students are returned
+Deliverables
+Folder Structure
+Organize your submission using the following folder structure in your GitHub repository:
+
+your-repository/
+├── src/                           # All source code goes here
+│   └── readme.md                  # Project documentation (setup, API endpoints, etc.)
+├── prompt/                        # LLM chat exports go here
+│   └── llm-chat-export.txt        # Exported LLM/AI assistant conversations
+└── test-cases/                    # Test cases documentation goes here
+		└── test-cases.txt             # Documentation on how to run each use case
+Required Files
+Complete source code in the src/ folder
+
+readme.md in the src/ folder with:
+
+Setup instructions
+Run instructions
+API endpoints documentation
+Sample requests and responses
+LLM Chat Export - Update prompt/llm-chat-export.txt:
+
+If you used LLMs/AI assistants, paste your complete exported conversation in this file
+Replace the placeholder content with your actual LLM chat export
+Test Cases Documentation - Update test-cases/test-cases.txt:
+
+Document how to run each use case from the problem (Recognition, Endorsements, Redemption)
+For each core functionality, include:
+How to test the feature
+Steps to execute the test
+Expected results
+Replace the placeholder content with your test case documentation
+ 
+ Before writing any code, restate the business goals, enumerate security/privacy requirements (PII minimization, authN/authZ assumptions, audit logging, rate limiting, input validation), and list architectural constraints when targeting Python + FastAPI + PostgreSQL. Flag any ambiguous requirements that need stakeholder clarification.
+
+Assistant: **Project Planning**
+- Business goals: deliver Boostly so students can recognize peers with credits, endorse recognitions, redeem credits for vouchers, reset/send limits monthly with optional carry-forward, and surface top recipients via leaderboard while keeping flows transparent and engaging.
+- Security & privacy: assume institution-provided accounts with SSO or campus OAuth (authN); enforce role-based access (students vs admins) and ownership checks on recognitions and balances (authZ); store minimal PII (student ID, name, email hash); encrypt credentials in transit (HTTPS) and at rest; log recognition/redemption actions with user IDs and timestamps for audits; rate-limit recognition, endorsement, and redemption endpoints to prevent abuse; validate all inputs (IDs, credit amounts, pagination params) and sanitize user-supplied text; comply with campus privacy policies and GDPR-style rights to access/delete personal data.
+- Architectural constraints targeting Python + FastAPI + PostgreSQL: FastAPI service exposing REST APIs, async SQLAlchemy (or equivalent) for DB layer, Alembic migrations, containerized deployment (Docker) targeting PostgreSQL 14+, background scheduler (Celery/APScheduler) for monthly reset jobs, use Pydantic models for validation, adhere to 12-factor configuration via environment variables, testing via pytest + HTTPX, API documented with OpenAPI/Swagger.
+
+**Clarifications Needed**
+- Ambiguous credit flow: Should recognitions immediately deduct sender balance or only reserve until accepted?
+- Identity source: Are students pre-provisioned with IDs/emails, and do we integrate with campus SSO?
+- Endorsement visibility: Do we need history of who endorsed or only counts?
+- Redemption fulfillment: Who issues vouchers (auto-generated code, manual review)?
+- Carry-forward rule: Does carry-forward apply before or after voucher redemption within month boundary?
+- Leaderboard window: All-time totals or reset per month/semester?
+
+User: Good Lets move ahead 
+
+ Domain Model Blueprint- Design the domain + ER model for Boostly. Entities must include Student, Recognition, Endorsement, CreditLedger/CreditSnapshot, Redemption, MonthlyQuota. Show attributes, indexes, and relationships, explain how monthly reset and carry-forward cap work, and note derived data (e.g., balances). Include anti-abuse measures such as preventing duplicate endorsements.
+
+Assistant: **Domain Blueprint**
+- **Student**: `student_id` (PK, indexed), `campus_uid` (unique), `email` (unique, lower-cased), `display_name`, `created_at`, `status`. Soft-delete flag optional for reinstatement; audit timestamps support reporting. Minimal PII (no DOB/phone) keeps privacy footprint low.
+- **Recognition**: `recognition_id` (PK), `sender_id` (FK→Student, indexed), `receiver_id` (FK→Student, indexed), `credits_transferred`, `message` (sanitized, length-limited), `created_at`, `updated_at`. Add composite index `(receiver_id, created_at)` for leaderboard queries; enforce `CHECK (sender_id <> receiver_id)` plus FK with `ON DELETE RESTRICT` to preserve history. Store denormalized `month_bucket` (e.g., 2025-11-01) for monthly analytics.
+
+**Endorsement**
+- Fields: `endorsement_id` (PK), `recognition_id` (FK→Recognition, indexed), `endorser_id` (FK→Student, indexed), `created_at`.
+- Constraints: unique `(recognition_id, endorser_id)` to block duplicates; cascade delete blocked to protect totals (soft delete via `active` flag if needed). Optional index `(endorser_id, created_at)` for rate limiting/audit.
+
+**CreditLedger / CreditSnapshot**
+- Ledger rows store immutable balance events: `entry_id` (PK), `student_id` (FK→Student, indexed), `source_type` (`RECOGNITION_IN`, `RECOGNITION_OUT`, `REDEMPTION`, `RESET`, `CARRY_FORWARD` …), `source_ref` (recognition/redemption id), `credits_delta` (signed), `month_bucket`, `created_at`.
+- Derived balance = `SUM(credits_delta)` filtered by student (materialized view or computed per request). Index `(student_id, month_bucket)` for monthly calculations. Optional `running_balance` column maintained by trigger for faster reads.
+- `CreditSnapshot` (optional) stores end-of-month totals: `snapshot_id`, `student_id`, `month_bucket`, `balance_end`, `carry_forward_amount`, `created_at`; unique `(student_id, month_bucket)` ensures single snapshot.
+
+**Redemption**
+- Fields: `redemption_id` (PK), `student_id` (FK→Student), `credits_redeemed`, `voucher_value` (computed `credits_redeemed * 5`), `status` (`PENDING`, `ISSUED`, `FAILED`), `created_at`, `fulfilled_at`, `issued_by`.
+- Constraints: `CHECK (credits_redeemed > 0)`; index `(student_id, created_at)` for history; link to ledger via `source_ref`. Redemption logic verifies available balance derived from ledger before insert, preventing overdraft.
+
+**MonthlyQuota**
+- Captures per-student monthly send allowance: `quota_id` (PK), `student_id` (FK→Student, unique), `month_bucket`, `credits_sent`, `limit_amount` (default 100), `carry_forward_applied` (boolean), `carry_forward_credits` (0-50), `reset_at`.
+- Unique `(student_id, month_bucket)`; index `(month_bucket, credits_sent)` for aggregate reporting. Update credits_sent atomically during recognition creation to enforce per-month 100 limit (plus optional carry).
+
+**Monthly Reset & Carry-Forward Flow**
+- Scheduled job at 00:00 on first day: compute unused `min(available_credits, 50)` from previous month via ledger sum. Insert two ledger entries: `RESET` (+100) and `CARRY_FORWARD_ADJUST` (+carry)`; if previous-month balance exceeds 50, insert `CARRY_FORWARD_CAP` (-excess). Update `MonthlyQuota.limit_amount` back to 100, set `credits_sent=0`, flag `carry_forward_applied`. All writes wrapped in transaction per student to avoid race conditions.
+- For new recognitions, service checks current month quota (`credits_sent + credits_requested <= limit_amount`) and current ledger balance (`available >= credits_requested`) before committing.
+
+**Relationships**
+- Student 1—* Recognition (as sender); Student 1—* Recognition (as receiver).
+- Recognition 1—* Endorsement (with unique composite key for anti-abuse).
+- Student 1—* Endorsement (as endorser).
+- Student 1—* CreditLedger entries; Recognition entries reference sender/receiver ledger rows via `source_ref`.
+- Student 1—* Redemption; Redemption 1—* Ledger entries (debit).
+- Student 1—* MonthlyQuota (per month).
+
+**Derived Data & Reporting**
+- Available balance = ledger sum per student minus pending redemptions; optionally materialize in read model table for dashboards (kept in sync via triggers or async worker).
+- Leaderboard query aggregates ledger credits where `source_type = RECOGNITION_IN`, joins recognition count per receiver and endorsement count per recognition (`COUNT(DISTINCT recognition_id)` and `SUM(endorsement_count)`).
+- Monthly activity metrics rely on `month_bucket` and indexes to avoid full scans.
+
+**Anti-Abuse Measures**
+- Unique constraints prevent duplicate endorsements and self-recognitions.
+- Triggers or optimistic locking on `MonthlyQuota` rows to block double-spend during concurrent requests.
+- Rate-limiting metadata: optionally store `last_recognition_at` on Student or use Redis counters for per-minute throttling.
+- All write operations require authentication context; audit columns (`created_by`, IP hash) can support investigations.
+
+**Indexes Snapshot**
+- `student (campus_uid unique, email unique)`.
+- `recognition (sender_id idx, receiver_id idx, (receiver_id, created_at), month_bucket idx)`.
+- `endorsement (recognition_id idx, endorser_id idx, unique(recognition_id, endorser_id))`.
+- `credit_ledger (student_id idx, (student_id, month_bucket), source_ref idx)`.
+- `redemption (student_id idx, status idx)`.
+- `monthly_quota (student_id, month_bucket unique)`.
+
+Next steps could include drafting sequence diagrams for recognition and redemption workflows or defining table DDLs once stakeholders confirm ambiguous pieces.
+
+User: nice. Help me design the folder structure, select Python framework (Flask/FastAPI/Django), and choose a suitable database (SQLite/PostgreSQL). Explain pros/cons and give me final recommended stack for Boostly. bewlo is the directory map.
+
+your-repository/
+├── src/                           # All source code goes here
+│   └── readme.md                  # Project documentation (setup, API endpoints, etc.)
+├── prompt/                        # LLM chat exports go here
+│   └── llm-chat-export.txt        # Exported LLM/AI assistant conversations
+└── test-cases/                    # Test cases documentation goes here
+		└── test-cases.txt             # Documentation on how to run each use case
+
+Assistant: **Stack Proposal**
+- Framework options:  
+	- `Flask`: minimal, flexible; cons: more boilerplate for validation/auth, async extensions immature.  
+	- `FastAPI`: async-first, Pydantic validation, auto OpenAPI docs; cons: steeper async/db learning curve, relies on Starlette ecosystem.  
+	- `Django`: batteries included (ORM, admin), but heavier, opinionated, async story partial; overkill for API-first microservice.
+
+- Database options:  
+	- `SQLite`: easy local setup, zero-config; cons: limited concurrency, weaker JSON/CTE support, no row-level security.  
+	- `PostgreSQL`: robust transactions, JSONB, window functions, extensions, scalable; cons: needs managed instance or ops overhead.
+
+- Recommended stack: `FastAPI` + `PostgreSQL`. Pairs well with async SQLAlchemy, aligns with performance and validation needs, supports future scaling, and meets audit/reporting requirements.
+
+**Source Layout (`src/`)**
+- `src/app/__init__.py`: FastAPI factory, dependency wiring.  
+- `src/app/core/`: config loader, logging setup, security helpers (JWT/OAuth hooks).  
+- `src/app/models/`: SQLAlchemy models, Alembic migrations in `migrations/`.  
+- `src/app/schemas/`: Pydantic request/response models.  
+- `src/app/repositories/`: DB access layers, ledger operations.  
+- `src/app/services/`: business logic (recognition, endorsement, redemption, reset scheduler).  
+- `src/app/api/v1/`: routers, path operations, error handlers.  
+- `src/app/jobs/`: APScheduler/Celery tasks for monthly reset.  
+- `src/app/utils/`: shared utilities (pagination, validation).  
+- `src/app/main.py`: ASGI entrypoint.  
+- `src/tests/`: pytest suites (unit, integration).  
+- `src/readme.md`: setup, run, API docs.  
+
+Ensure `prompt/llm-chat-export.txt` logs conversations, and `test-cases/test-cases.txt` documents scenario execution. Next steps: scaffold FastAPI project, add dependency management (`poetry`/`pip-tools`), and configure Docker-compose for app + PostgreSQL.
+
